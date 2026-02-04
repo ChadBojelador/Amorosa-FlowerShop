@@ -20,6 +20,10 @@ const bouquetSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    image_url: {
+        type: String,
+        default: null
+    },
     is_available: {
         type: Boolean,
         default: true
