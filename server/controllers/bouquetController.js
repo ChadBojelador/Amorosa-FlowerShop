@@ -2,7 +2,7 @@ const Bouquet = require('../models/Bouquet');
 const BouquetVariant = require('../models/BouquetVariant');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const { Readable } = require('stream');
 
 // Configure Cloudinary
 cloudinary.config({
@@ -11,22 +11,42 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Configure multer with Cloudinary storage
-const storage = new CloudinaryStorage({
-    cloudinary: cloudinary,
-    params: {
-        folder: 'amorosa/bouquets',
-        allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
-        transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
-    }
-});
+// Configure multer to use memory storage
+const storage = multer.memoryStorage();
 
 const upload = multer({ 
     storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+    fileFilter: function (req, file, cb) {
+        const allowedTypes = /jpeg|jpg|png|gif|webp/;
+        const mimetype = allowedTypes.test(file.mimetype);
+        if (mimetype) {
+            return cb(null, true);
+        }
+        cb(new Error('Only image files are allowed!'));
+    }
 });
 
 exports.upload = upload;
+
+// Helper function to upload to Cloudinary
+const uploadToCloudinary = (buffer) => {
+    return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+            {
+                folder: 'amorosa/bouquets',
+                transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
+            },
+            (error, result) => {
+                if (error) reject(error);
+                else resolve(result);
+            }
+        );
+        
+        const readableStream = Readable.from(buffer);
+        readableStream.pipe(uploadStream);
+    });
+};
 
 // GET /bouquets - Get all bouquets
 exports.getAllBouquets = async (req, res) => {
@@ -75,9 +95,10 @@ exports.createBouquet = async (req, res) => {
             is_available: is_available === 'true' || is_available === true
         };
 
-        // Add Cloudinary image URL if uploaded
+        // Upload image to Cloudinary if provided
         if (req.file) {
-            bouquetData.image_url = req.file.path; // Cloudinary returns the full URL in req.file.path
+            const result = await uploadToCloudinary(req.file.buffer);
+            bouquetData.image_url = result.secure_url;
         }
 
         const bouquet = new Bouquet(bouquetData);
@@ -102,9 +123,10 @@ exports.updateBouquet = async (req, res) => {
             is_available: is_available === 'true' || is_available === true
         };
 
-        // Add Cloudinary image URL if uploaded
+        // Upload image to Cloudinary if provided
         if (req.file) {
-            updateData.image_url = req.file.path; // Cloudinary returns the full URL in req.file.path
+            const result = await uploadToCloudinary(req.file.buffer);
+            updateData.image_url = result.secure_url;
         }
 
         const bouquet = await Bouquet.findByIdAndUpdate(
